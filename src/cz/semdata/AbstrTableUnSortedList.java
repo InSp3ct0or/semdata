@@ -23,49 +23,44 @@ public class AbstrTableUnSortedList<K extends Comparable<K>, V> implements IAbst
 
     @Override
     public V najdi(K key) {
-        if (jePrazdny()) return null;
-
-        try {
-            list.zpristupniPrvni();
-            do {
-                PrvekTabulky<K, V> currentEntry = list.zpristupniAktualni();
-                if (currentEntry.getKey().compareTo(key) == 0) {
-                    return currentEntry.getValue();
-                }
-                list.zpristupniNaslednika();
-            } while (true);
-        } catch (NoSuchElementException e) {
-            return null;
-        }
+        PrvekTabulky<K, V> entry = najdiEntry(key);
+        return (entry != null) ? entry.getValue() : null;
     }
 
     @Override
     public void vloz(K key, V value) {
-        if (najdi(key) != null) {
-
-            PrvekTabulky<K, V> entry = najdiEntry(key);
-
-            if (entry != null) {
-                entry.setValue(value);
-                return;
+        try {
+            list.zpristupniPrvni();
+            while (true) {
+                PrvekTabulky<K, V> current = list.zpristupniAktualni();
+                if (current.getKey().equals(key)) {
+                    current.setValue(value);
+                    return;
+                }
+                list.zpristupniNaslednika();
             }
+        } catch (NoSuchElementException e) {
+            list.vlozPosledni(new PrvekTabulky<>(key, value));
         }
+    }
 
+    public void vlozBezKontroly(K key, V value) {
         list.vlozPosledni(new PrvekTabulky<>(key, value));
     }
 
     private PrvekTabulky<K, V> najdiEntry(K key) {
-        if (jePrazdny()) return null;
-
+        if (jePrazdny()) {
+            return null;
+        }
         try {
             list.zpristupniPrvni();
-            do {
-                PrvekTabulky<K, V> currentEntry = list.zpristupniAktualni();
-                if (currentEntry.getKey().compareTo(key) == 0) {
-                    return currentEntry;
+            while (true) {
+                PrvekTabulky<K, V> current = list.zpristupniAktualni();
+                if (current.getKey().equals(key)) {
+                    return current;
                 }
                 list.zpristupniNaslednika();
-            } while (true);
+            }
         } catch (NoSuchElementException e) {
             return null;
         }

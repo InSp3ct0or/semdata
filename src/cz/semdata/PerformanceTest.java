@@ -22,7 +22,7 @@ public class PerformanceTest {
 
         @Override
         public String toString() {
-            return String.format("| %-30s | %-15d | %-15d | %-15d |",
+            return String.format("| %-40s | %-15d | %-15d | %-15d |",
                     implName, vlozTime, najdiTime, odeberTime);
         }
     }
@@ -33,26 +33,28 @@ public class PerformanceTest {
         System.out.println("Počáteční velikost tabulek: " + INITIAL_SIZE + " prvků.");
 
         List<PrvekTabulky<String, Zaznam>> initialData = generateTestData(INITIAL_SIZE, 0, MAX_PRIORITY);
-        List<PrvekTabulky<String, Zaznam>> insertData = generateTestData(REPLICATION_COUNT, INITIAL_SIZE, MAX_PRIORITY);
-
-        List<String> insertKeys = insertData.stream().map(PrvekTabulky::getKey).toList();
-
+        
         List<String> findKeys = initialData.stream().map(PrvekTabulky::getKey).collect(Collectors.toCollection(ArrayList::new));
         List<String> deleteFromMiddleKeys = new ArrayList<>(findKeys);
         Collections.shuffle(deleteFromMiddleKeys);
 
         List<TestResult> results = new ArrayList<>();
 
-        results.add(runTests(new AbstrTable<>(), "AbstrTableBVS", initialData, insertData, deleteFromMiddleKeys, findKeys));
+        List<PrvekTabulky<String, Zaznam>> insertDataBVS = generateTestData(REPLICATION_COUNT, INITIAL_SIZE, MAX_PRIORITY);
+        results.add(runTests(new AbstrTable<>(), "AbstrTableBVS", initialData, insertDataBVS, deleteFromMiddleKeys, findKeys));
 
-        results.add(runTests(new AbstrTableUnSortedList<>(), "AbstrTableUnSortedList", initialData, insertData, deleteFromMiddleKeys, findKeys));
+        List<PrvekTabulky<String, Zaznam>> insertDataUnsorted = generateTestData(REPLICATION_COUNT, INITIAL_SIZE + REPLICATION_COUNT, MAX_PRIORITY);
+        results.addAll(runUnsortedTests(initialData, insertDataUnsorted, deleteFromMiddleKeys, findKeys));
 
-        results.add(runTests(new AbstrTableArray<>(), "AbstrTableArray", initialData, insertData, deleteFromMiddleKeys, findKeys));
+
+        List<PrvekTabulky<String, Zaznam>> insertDataArray = generateTestData(REPLICATION_COUNT, INITIAL_SIZE + 2 * REPLICATION_COUNT, MAX_PRIORITY);
+        results.add(runTests(new AbstrTableArray<>(), "AbstrTableArray", initialData, insertDataArray, deleteFromMiddleKeys, findKeys));
 
         AbstrTableSortedList<String, Zaznam> sortedListTable = new AbstrTableSortedList<>();
-        results.add(runTests(sortedListTable, "AbstrTableSortedList (SEQ)", initialData, insertData, deleteFromMiddleKeys, findKeys));
+        List<PrvekTabulky<String, Zaznam>> insertDataSorted = generateTestData(REPLICATION_COUNT, INITIAL_SIZE + 3 * REPLICATION_COUNT, MAX_PRIORITY);
+        results.add(runTests(sortedListTable, "AbstrTableSortedList (SEQ)", initialData, insertDataSorted, deleteFromMiddleKeys, findKeys));
 
-        TestResult sortedBinResult = runTestsBinary(sortedListTable, "AbstrTableSortedList (BIN)", initialData, insertData, deleteFromMiddleKeys, findKeys);
+        TestResult sortedBinResult = runTestsBinary(sortedListTable, "AbstrTableSortedList (BIN)", initialData, deleteFromMiddleKeys, findKeys);
         TestResult seqResult = results.stream().filter(r -> r.implName.contains("(SEQ)")).findFirst().get();
         sortedBinResult.vlozTime = seqResult.vlozTime;
         sortedBinResult.odeberTime = seqResult.odeberTime;
@@ -60,6 +62,50 @@ public class PerformanceTest {
 
         printResults(results);
     }
+
+    private static List<TestResult> runUnsortedTests(
+            List<PrvekTabulky<String, Zaznam>> initialData,
+            List<PrvekTabulky<String, Zaznam>> insertData,
+            List<String> deleteFromMiddleKeys,
+            List<String> findKeys) {
+
+        List<TestResult> unsortedResults = new ArrayList<>();
+
+        AbstrTableUnSortedList<String, Zaznam> tableWithCheck = new AbstrTableUnSortedList<>();
+        unsortedResults.add(runTests(tableWithCheck, "AbstrTableUnSortedList (s kontrolou)", initialData, insertData, deleteFromMiddleKeys, findKeys));
+
+        AbstrTableUnSortedList<String, Zaznam> tableWithoutCheck = new AbstrTableUnSortedList<>();
+        TestResult resultNoCheck = new TestResult("AbstrTableUnSortedList (bez kontroly)");
+
+        for (PrvekTabulky<String, Zaznam> entry : initialData) {
+            tableWithoutCheck.vlozBezKontroly(entry.getKey(), entry.getValue());
+        }
+
+        long startNajdi = System.nanoTime();
+        for (int i = 0; i < REPLICATION_COUNT; i++) {
+            tableWithoutCheck.najdi(findKeys.get(i * (INITIAL_SIZE / REPLICATION_COUNT) % INITIAL_SIZE));
+        }
+        resultNoCheck.najdiTime = (System.nanoTime() - startNajdi) / REPLICATION_COUNT;
+
+        long startVloz = System.nanoTime();
+        for (int i = 0; i < REPLICATION_COUNT; i++) {
+            PrvekTabulky<String, Zaznam> entry = insertData.get(i);
+            tableWithoutCheck.vlozBezKontroly(entry.getKey(), entry.getValue());
+        }
+        resultNoCheck.vlozTime = (System.nanoTime() - startVloz) / REPLICATION_COUNT;
+
+        long startOdeber = System.nanoTime();
+        for (int i = 0; i < REPLICATION_COUNT; i++) {
+            tableWithoutCheck.odeber(deleteFromMiddleKeys.get(i));
+        }
+        resultNoCheck.odeberTime = (System.nanoTime() - startOdeber) / REPLICATION_COUNT;
+
+        tableWithoutCheck.zrus();
+        unsortedResults.add(resultNoCheck);
+
+        return unsortedResults;
+    }
+
 
     private static List<PrvekTabulky<String, Zaznam>> generateTestData(int count, int idStart, int maxPrio) {
         List<PrvekTabulky<String, Zaznam>> data = new ArrayList<>(count);
@@ -80,6 +126,7 @@ public class PerformanceTest {
                                        List<String> findKeys) {
         TestResult result = new TestResult(name);
 
+        table.zrus();
         for (PrvekTabulky<String, Zaznam> entry : initialData) {
             table.vloz(entry.getKey(), entry.getValue());
         }
@@ -109,13 +156,15 @@ public class PerformanceTest {
 
     private static TestResult runTestsBinary(AbstrTableSortedList<String, Zaznam> table, String name,
                                              List<PrvekTabulky<String, Zaznam>> initialData,
-                                             List<PrvekTabulky<String, Zaznam>> insertData,
                                              List<String> deleteFromMiddleKeys,
                                              List<String> findKeys) {
         TestResult result = new TestResult(name);
 
-        for (PrvekTabulky<String, Zaznam> entry : initialData) {
-            table.vloz(entry.getKey(), entry.getValue());
+
+        if (table.jePrazdny()) {
+            for (PrvekTabulky<String, Zaznam> entry : initialData) {
+                table.vloz(entry.getKey(), entry.getValue());
+            }
         }
 
         long startNajdi = System.nanoTime();
@@ -124,23 +173,24 @@ public class PerformanceTest {
         }
         result.najdiTime = (System.nanoTime() - startNajdi) / REPLICATION_COUNT;
 
-        table.zrus();
+
         return result;
     }
 
     private static void printResults(List<TestResult> results) {
         System.out.println("\n--- Výsledky Časové Výkonnosti (ns/operaci, průměr z " + REPLICATION_COUNT + " opakování) ---");
-        System.out.println("------------------------------------------------------------------------------------------------");
-        System.out.println(String.format("| %-30s | %-15s | %-15s | %-15s |",
+        System.out.println("-----------------------------------------------------------------------------------------------------------------");
+        System.out.println(String.format("| %-40s | %-15s | %-15s | %-15s |",
                 "Implementace", "Vlož (ns)", "Najdi (ns)", "Odeber (ns)"));
-        System.out.println("------------------------------------------------------------------------------------------------");
+        System.out.println("-----------------------------------------------------------------------------------------------------------------");
+        results.sort((r1, r2) -> r1.implName.compareTo(r2.implName));
         for (TestResult r : results) {
             System.out.println(r);
         }
-        System.out.println("------------------------------------------------------------------------------------------------");
+        System.out.println("-----------------------------------------------------------------------------------------------------------------");
 
-        System.out.println("\n*** Analýza pro manuální vytvoření grafů v Excelu ***");
-        System.out.println("Zde jsou data pro váš graf (Zkopírujte tyto řádky):");
+        System.out.println("\n*** Analýza pro manuální vytvoření grafů ***");
+        System.out.println("Zde jsou data pro graf :");
 
         System.out.println("\nGraf VLOŽ:");
         for (TestResult r : results) {
